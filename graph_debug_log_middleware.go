@@ -52,29 +52,34 @@ func (mw *GraphDebugLogMiddleware) Intercept(
 
 	// Payload
 	if req.ContentLength > 0 && mw.showPayloads {
-		payload, err := io.ReadAll(req.Body)
-		if err != nil {
-			mw.logger.Printf("Error reading request body: %v\n", err)
-			return pipeline.Next(req, middlewareIndex)
+		contentType := req.Header.Get("Content-Type")
+		if contentType == "application/octet-stream" {
+			mw.logger.Print("Binary content")
+		} else {
+			payload, err := io.ReadAll(req.Body)
+			if err != nil {
+				mw.logger.Printf("Error reading request body: %v\n", err)
+				return pipeline.Next(req, middlewareIndex)
+			}
+
+			// Reset request body
+			req.Body = io.NopCloser(bytes.NewBuffer(payload))
+
+			byteReader := bytes.NewReader(payload)
+			gzReader, err := gzip.NewReader(byteReader)
+			if err != nil {
+				mw.logger.Printf("Error creating gzip reader: %v", err)
+				return pipeline.Next(req, middlewareIndex)
+			}
+
+			decompressed, err := io.ReadAll(gzReader)
+			if err != nil {
+				mw.logger.Printf("Error decompressing request payload: %v", err)
+				return pipeline.Next(req, middlewareIndex)
+			}
+
+			mw.logger.Printf("Payload: %s\n", string(decompressed))
 		}
-
-		// Reset request body
-		req.Body = io.NopCloser(bytes.NewBuffer(payload))
-
-		byteReader := bytes.NewReader(payload)
-		gzReader, err := gzip.NewReader(byteReader)
-		if err != nil {
-			mw.logger.Printf("Error creating gzip reader: %v", err)
-			return pipeline.Next(req, middlewareIndex)
-		}
-
-		decompressed, err := io.ReadAll(gzReader)
-		if err != nil {
-			mw.logger.Printf("Error decompressing request payload: %v", err)
-			return pipeline.Next(req, middlewareIndex)
-		}
-
-		mw.logger.Printf("Payload: %s\n", string(decompressed))
 	}
 
 	response, pipelineErr := pipeline.Next(req, middlewareIndex)
